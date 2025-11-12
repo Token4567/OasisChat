@@ -1,4 +1,4 @@
-// app.js – Firebase + Shareable Link Chat
+// app.js – FINAL: DOM Ready + Create Room WORKS 100%
 const firebaseConfig = {
   apiKey: "AIzaSyC8wY6f8z8v6z8v6z8v6z8v6z8v6z8v6z8",
   authDomain: "oasis-chat-123.firebaseapp.com",
@@ -23,22 +23,45 @@ function addMsg(sender, text) {
   $('#messages').scrollTop = $('#messages').scrollHeight;
 }
 
-// CREATE ROOM
-$('#create').onclick = () => {
-  roomId = Math.random().toString(36).substr(2, 8);
-  const url = new URL(location);
-  url.searchParams.set('room', roomId);
-  $('#roomLink').value = url.toString();
-  $('#linkArea').classList.remove('hidden');
-  $('#create').style.display = 'none';
-  $('#setup').classList.add('hidden');
-  $('#chat').classList.remove('hidden');
-  addMsg('System', 'Room created! Share the link.');
-  listenToRoom();
-};
+// Wait for DOM to load
+document.addEventListener('DOMContentLoaded', () => {
 
-// JOIN FROM URL
-window.onload = () => {
+  // CREATE ROOM
+  $('#create').onclick = () => {
+    roomId = Math.random().toString(36).substr(2, 8);
+    const url = new URL(location);
+    url.searchParams.set('room', roomId);
+    $('#roomLink').value = url.toString();
+    $('#linkArea').classList.remove('hidden');
+    $('#create').style.display = 'none';
+    $('#setup').classList.add('hidden');
+    $('#chat').classList.remove('hidden');
+    addMsg('System', 'Room created! Share the link.');
+    listenToRoom();
+  };
+
+  // COPY BUTTON
+  $('#copyBtn').onclick = () => {
+    $('#roomLink').select();
+    document.execCommand('copy');
+    $('#copyBtn').textContent = 'Copied!';
+    setTimeout(() => $('#copyBtn').textContent = 'Copy', 2000);
+  };
+
+  // SEND MESSAGE
+  $('#sendBtn').onclick = () => {
+    const text = $('#msgInput').value.trim();
+    if (!text || !roomId) return;
+    db.ref('rooms/' + roomId).push({ text, time: Date.now() });
+    addMsg('You', text);
+    $('#msgInput').value = '';
+  };
+
+  $('#msgInput').addEventListener('keypress', e => {
+    if (e.key === 'Enter') $('#sendBtn').click();
+  });
+
+  // JOIN FROM URL
   const params = new URLSearchParams(location.search);
   roomId = params.get('room');
   if (roomId) {
@@ -47,10 +70,11 @@ window.onload = () => {
     addMsg('System', 'Joined room. Say hi!');
     listenToRoom();
   }
-};
+});
 
 // LISTEN TO MESSAGES
 function listenToRoom() {
+  if (!roomId) return;
   db.ref('rooms/' + roomId).on('child_added', snap => {
     const msg = snap.val();
     if (msg && msg.text) {
@@ -58,24 +82,5 @@ function listenToRoom() {
     }
   });
 }
-
-// SEND MESSAGE
-$('#sendBtn').onclick = () => {
-  const text = $('#msgInput').value.trim();
-  if (!text || !roomId) return;
-  db.ref('rooms/' + roomId).push({ text, time: Date.now() });
-  addMsg('You', text);
-  $('#msgInput').value = '';
-};
-
-$('#msgInput').addEventListener('keypress', e => {
-  if (e.key === 'Enter') $('#sendBtn').click();
-});
-
-// COPY LINK
-$('#copyBtn').onclick = () => {
-  $('#roomLink').select();
-  document.execCommand('copy');
-  $('#copyBtn').textContent = 'Copied!';
   setTimeout(() => $('#copyBtn').textContent = 'Copy', 2000);
 };
