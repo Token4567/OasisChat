@@ -1,26 +1,10 @@
-// app.js – FIXED: Waits for DOM + no null errors
-let pc, dc, sharedKey;
-const cfg = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+// app.js – Simple ID-based chat with WebSocket relay + AES encryption
+const ws = new WebSocket('wss://echo.websocket.org'); // Public relay (echoes messages to all connected)
+let roomId = null;
+let key = null;
+const $ = id => document.getElementById(id);
 
-function $(id) { return document.getElementById(id); }
-
-// Crypto
-const gen = () => crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);
-const der = (a,b) => crypto.subtle.deriveKey({name:'ECDH',public:b},a,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
-const enc = async (k,t) => {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const e = await crypto.subtle.encrypt({name:'AES-GCM',iv},k,new TextEncoder().encode(t));
-  const a = new Uint8Array(12+e.byteLength); a.set(iv); a.set(new Uint8Array(e),12);
-  return btoa(String.fromCharCode(...a));
-};
-const dec = async (k,b) => {
-  const a = Uint8Array.from(atob(b),c=>c.charCodeAt(0));
-  return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:a.slice(0,12)},k,a.slice(12)));
-};
-const exp = k => crypto.subtle.exportKey('spki',k).then(e=>btoa(String.fromCharCode(...new Uint8Array(e))));
-const imp = b => crypto.subtle.importKey('spki',Uint8Array.from(atob(b),c=>c.charCodeAt(0)),{name:'ECDH',namedCurve:'P-256'},true,[]);
-
-function addMsg(sender, text) {
+function addMessage(sender, text) {
   const div = document.createElement('div');
   div.className = `message ${sender === 'You' ? 'sent' : 'received'}`;
   div.textContent = text;
@@ -28,89 +12,73 @@ function addMsg(sender, text) {
   $('#messages').scrollTop = $('#messages').scrollHeight;
 }
 
-// Wait for DOM to load
-document.addEventListener('DOMContentLoaded', () => {
-  // CREATE ROOM
-  $('#create').onclick = async () => {
-    const roomId = Math.random().toString(36).substr(2, 8);
-    const kp = await gen();
-    const pub = await exp(kp.publicKey);
-
-    pc = new RTCPeerConnection(cfg);
-    dc = pc.createDataChannel('chat');
-    setupDC();
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    const updateLink = () => {
-      const url = new URL(location);
-      url.searchParams.set('room', roomId);
-      url.searchParams.set('pub', pub);
-      if (pc.localDescription?.sdp) {
-        url.searchParams.set('sdp', btoa(pc.localDescription.sdp));
-      }
-      $('#roomLink').value = url.toString();
-    };
-
-    pc.onicecandidate = updateLink;
-    setInterval(updateLink, 500);
-    updateLink();
-
-    $('#linkArea').classList.remove('hidden');
-    $('#create').style.display = 'none';
-    $('#setup').classList.add('hidden');
-    $('#chat').classList.remove('hidden');
-  };
-
-  // COPY BUTTON
-  $('#copyBtn').onclick = () => {
-    $('#roomLink').select();
-    document.execCommand('copy');
-    $('#copyBtn').textContent = 'Copied!';
-    setTimeout(() => $('#copyBtn').textContent = 'Copy', 2000);
-  };
-
-  // SEND
-  $('#sendBtn').onclick = async () => {
-    const t = $('#msgInput').value.trim();
-    if (!t || !dc || dc.readyState !== 'open') return;
-    dc.send(await enc(sharedKey, t));
-    addMsg('You', t);
-    $('#msgInput').value = '';
-  };
-});
-
-// JOIN FROM URL
-document.addEventListener('DOMContentLoaded', async () => {
-  const url = new URL(location);
-  const room = url.searchParams.get('room');
-  const pubB64 = url.searchParams.get('pub');
-  const sdpB64 = url.searchParams.get('sdp');
-
-  if (room && pubB64 && sdpB64) {
-    try {
-      const kp = await gen();
-      const partnerPub = await imp(pubB64);
-      sharedKey = await der(kp.privateKey, partnerPub);
-
-      pc = new RTCPeerConnection(cfg);
-      pc.ondatachannel = e => { dc = e.channel; setupDC(); };
-
-      await pc.setRemoteDescription({ type: 'offer', sdp: atob(sdpB64) });
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      $('#setup').classList.add('hidden');
-      $('#chat').classList.remove('hidden');
-    } catch (e) {
-      console.error('Join failed:', e);
-    }
-  }
-});
-
-// DATA CHANNEL
-function setupDC() {
-  dc.onopen = () => addMsg('System', 'Connected & encrypted');
-  dc.onmessage = async e => addMsg('Partner', await dec(sharedKey, e.data));
+// Derive key from room ID (simple AES key)
+function deriveKey(id) {
+  return CryptoJS.SHA256(id).toString();
 }
+
+// Encrypt/decrypt with AES
+function encrypt(text, keyStr) {
+  return CryptoJS.AES.encrypt(text, keyStr).toString();
+}
+function decrypt(encrypted, keyStr) {
+  const bytes = CryptoJS.AES.decrypt(encrypted, keyStr);
+  return bytes.toString(CryptoJS.enc.Utf8);
+}
+
+// WebSocket events
+ws.onopen = () => console.log('Connected to relay');
+ws.onmessage = (e) => {
+  if (!roomId) return;
+  try {
+    const data = JSON.parse(e.data);
+    if (data.room === roomId) {
+      const text = decrypt(data.msg, key);
+      addMessage('Partner', text);
+    }
+  } catch {}
+};
+
+// Create Room
+$('#create').onclick = () => {
+  roomId = Math.random().toString(36).substr(2, 6).toUpperCase();
+  key = deriveKey(roomId);
+  $('#myId').textContent = roomId;
+  $('#myIdArea').classList.remove('hidden');
+  $('#setup').classList.add('hidden');
+  $('#chat').classList.remove('hidden');
+  addMessage('System', 'Room created! Share the ID: ' + roomId);
+};
+
+// Join Room
+$('#join').onclick = () => {
+  const inputId = $('#roomId').value.trim().toUpperCase();
+  if (!inputId) return alert('Enter a room ID');
+  roomId = inputId;
+  key = deriveKey(roomId);
+  $('#setup').classList.add('hidden');
+  $('#chat').classList.remove('hidden');
+  addMessage('System', 'Joined room ' + roomId + '. Waiting for messages...');
+};
+
+// Copy ID
+$('#copyId').onclick = () => {
+  navigator.clipboard.writeText(roomId).then(() => {
+    $('#copyId').textContent = 'Copied!';
+    setTimeout(() => $('#copyId').textContent = 'Copy ID', 2000);
+  });
+};
+
+// Send Message
+$('#sendBtn').onclick = () => {
+  const text = $('#msgInput').value.trim();
+  if (!text || !roomId) return;
+  const encrypted = encrypt(text, key);
+  ws.send(JSON.stringify({ room: roomId, msg: encrypted }));
+  addMessage('You', text);
+  $('#msgInput').value = '';
+};
+
+$('#msgInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') $('#sendBtn').click();
+});
