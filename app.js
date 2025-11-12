@@ -1,9 +1,10 @@
-// app.js – SYNTAX-FIXED: 100% WORKING CREATE ROOM + LINK SHARE
+// app.js – FIXED: Waits for DOM + no null errors
 let pc, dc, sharedKey;
 const cfg = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-const $ = id => document.getElementById(id);
 
-// Crypto (fixed syntax)
+function $(id) { return document.getElementById(id); }
+
+// Crypto
 const gen = () => crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveKey']);
 const der = (a,b) => crypto.subtle.deriveKey({name:'ECDH',public:b},a,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
 const enc = async (k,t) => {
@@ -27,8 +28,9 @@ function addMsg(sender, text) {
   $('#messages').scrollTop = $('#messages').scrollHeight;
 }
 
-// CREATE ROOM (ATTACHES ON LOAD)
+// Wait for DOM to load
 document.addEventListener('DOMContentLoaded', () => {
+  // CREATE ROOM
   $('#create').onclick = async () => {
     const roomId = Math.random().toString(36).substr(2, 8);
     const kp = await gen();
@@ -60,6 +62,23 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#setup').classList.add('hidden');
     $('#chat').classList.remove('hidden');
   };
+
+  // COPY BUTTON
+  $('#copyBtn').onclick = () => {
+    $('#roomLink').select();
+    document.execCommand('copy');
+    $('#copyBtn').textContent = 'Copied!';
+    setTimeout(() => $('#copyBtn').textContent = 'Copy', 2000);
+  };
+
+  // SEND
+  $('#sendBtn').onclick = async () => {
+    const t = $('#msgInput').value.trim();
+    if (!t || !dc || dc.readyState !== 'open') return;
+    dc.send(await enc(sharedKey, t));
+    addMsg('You', t);
+    $('#msgInput').value = '';
+  };
 });
 
 // JOIN FROM URL
@@ -85,30 +104,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       $('#setup').classList.add('hidden');
       $('#chat').classList.remove('hidden');
     } catch (e) {
-      console.error('Join error:', e);
+      console.error('Join failed:', e);
     }
   }
-});
-
-// COPY BUTTON
-document.addEventListener('DOMContentLoaded', () => {
-  $('#copyBtn').onclick = () => {
-    $('#roomLink').select();
-    document.execCommand('copy');
-    $('#copyBtn').textContent = 'Copied!';
-    setTimeout(() => $('#copyBtn').textContent = 'Copy', 2000);
-  };
-});
-
-// SEND
-document.addEventListener('DOMContentLoaded', () => {
-  $('#sendBtn').onclick = async () => {
-    const t = $('#msgInput').value.trim();
-    if (!t || !dc || dc.readyState !== 'open') return;
-    dc.send(await enc(sharedKey, t));
-    addMsg('You', t);
-    $('#msgInput').value = '';
-  };
 });
 
 // DATA CHANNEL
