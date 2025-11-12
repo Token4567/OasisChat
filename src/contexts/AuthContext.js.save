@@ -1,0 +1,81 @@
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { auth, db } from '../firebase';
+import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { doc, setDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
+
+const AuthContext = createContext();
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
+
+export function AuthProvider({ children }) {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const provider = new GoogleAuthProvider();
+
+ const signInWithGoogle = async () => {
+    setLoading(true);
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      await setDoc(doc(db, 'users', user.uid), {
+        uid: user.uid,
+        displayName: user.displayName,
+        email: user.email,
+        photoURL: user.photoURL || '',
+        bio: 'Hey! I\'m using OasisChat.'
+      }, { merge: true });
+      return result;
+    } catch (error) {
+      console.error("Sign in error:", error);
+      setLoading(false);
+      throw error;
+    }
+  };
+
+  const logout = async () => {
+    setLoading(true);
+    try {
+      await signOut(auth);
+      setCurrentUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getUsers = (callback) => {
+    if (!currentUser) return () => {};
+    const q = query(
+      collection(db, 'users'),
+      where('uid', '!=', currentUser.uid)
+    );
+    return onSnapshot(q, (snapshot) => {
+      const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      callback(users);
+    });
+  };
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setCurrentUser(user);
+      setLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  const value = {
+    currentUser,
+    signInWithGoogle,
+    logout,
+    getUsers,
+    loading
+  };
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
