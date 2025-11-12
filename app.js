@@ -1,33 +1,19 @@
-// app.js – FINAL: DOM Ready + Create Room WORKS
-let roomId = null;
-let key = null;
-const $ = id => document.getElementById(id);
-
-// CryptoJS is loaded from CDN
-function deriveKey(id) {
-  return CryptoJS.SHA256(id).toString();
-}
-function encrypt(text, keyStr) {
-  return CryptoJS.AES.encrypt(text, keyStr).toString();
-}
-function decrypt(encrypted, keyStr) {
-  const bytes = CryptoJS.AES.decrypt(encrypted, keyStr);
-  return bytes.toString(CryptoJS.enc.Utf8);
-}
-
-// WebSocket relay
-const ws = new WebSocket('wss://echo.websocket.org');
-ws.onopen = () => console.log('Connected');
-ws.onmessage = (e) => {
-  if (!roomId) return;
-  try {
-    const data = JSON.parse(e.data);
-    if (data.room === roomId && data.msg) {
-      const text = decrypt(data.msg, key);
-      if (text) addMsg('Partner', text);
-    }
-  } catch {}
+// app.js – Firebase + Shareable Link Chat
+const firebaseConfig = {
+  apiKey: "AIzaSyC8wY6f8z8v6z8v6z8v6z8v6z8v6z8v6z8",
+  authDomain: "oasis-chat-123.firebaseapp.com",
+  databaseURL: "https://oasis-chat-123-default-rtdb.firebaseio.com",
+  projectId: "oasis-chat-123",
+  storageBucket: "oasis-chat-123.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abcdef123456"
 };
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let roomId = null;
+const $ = id => document.getElementById(id);
 
 function addMsg(sender, text) {
   const div = document.createElement('div');
@@ -37,49 +23,59 @@ function addMsg(sender, text) {
   $('#messages').scrollTop = $('#messages').scrollHeight;
 }
 
-// Wait for DOM
-document.addEventListener('DOMContentLoaded', () => {
-  // CREATE ROOM
-  $('#create').onclick = () => {
-    roomId = Math.random().toString(36).substr(2, 6).toUpperCase();
-    key = deriveKey(roomId);
-    $('#myId').textContent = roomId;
-    $('#myIdArea').classList.remove('hidden');
+// CREATE ROOM
+$('#create').onclick = () => {
+  roomId = Math.random().toString(36).substr(2, 8);
+  const url = new URL(location);
+  url.searchParams.set('room', roomId);
+  $('#roomLink').value = url.toString();
+  $('#linkArea').classList.remove('hidden');
+  $('#create').style.display = 'none';
+  $('#setup').classList.add('hidden');
+  $('#chat').classList.remove('hidden');
+  addMsg('System', 'Room created! Share the link.');
+  listenToRoom();
+};
+
+// JOIN FROM URL
+window.onload = () => {
+  const params = new URLSearchParams(location.search);
+  roomId = params.get('room');
+  if (roomId) {
     $('#setup').classList.add('hidden');
     $('#chat').classList.remove('hidden');
-    addMsg('System', `Room created! Share ID: ${roomId}`);
-  };
+    addMsg('System', 'Joined room. Say hi!');
+    listenToRoom();
+  }
+};
 
-  // JOIN ROOM
-  $('#join').onclick = () => {
-    const input = $('#roomId').value.trim().toUpperCase();
-    if (!input) return alert('Enter a room ID');
-    roomId = input;
-    key = deriveKey(roomId);
-    $('#setup').classList.add('hidden');
-    $('#chat').classList.remove('hidden');
-    addMsg('System', `Joined room ${roomId}`);
-  };
-
-  // COPY ID
-  $('#copyId').onclick = () => {
-    navigator.clipboard.writeText(roomId).then(() => {
-      $('#copyId').textContent = 'Copied!';
-      setTimeout(() => $('#copyId').textContent = 'Copy ID', 2000);
-    });
-  };
-
-  // SEND
-  $('#sendBtn').onclick = () => {
-    const text = $('#msgInput').value.trim();
-    if (!text || !roomId) return;
-    const encrypted = encrypt(text, key);
-    ws.send(JSON.stringify({ room: roomId, msg: encrypted }));
-    addMsg('You', text);
-    $('#msgInput').value = '';
-  };
-
-  $('#msgInput').addEventListener('keypress', e => {
-    if (e.key === 'Enter') $('#sendBtn').click();
+// LISTEN TO MESSAGES
+function listenToRoom() {
+  db.ref('rooms/' + roomId).on('child_added', snap => {
+    const msg = snap.val();
+    if (msg && msg.text) {
+      addMsg('Partner', msg.text);
+    }
   });
+}
+
+// SEND MESSAGE
+$('#sendBtn').onclick = () => {
+  const text = $('#msgInput').value.trim();
+  if (!text || !roomId) return;
+  db.ref('rooms/' + roomId).push({ text, time: Date.now() });
+  addMsg('You', text);
+  $('#msgInput').value = '';
+};
+
+$('#msgInput').addEventListener('keypress', e => {
+  if (e.key === 'Enter') $('#sendBtn').click();
 });
+
+// COPY LINK
+$('#copyBtn').onclick = () => {
+  $('#roomLink').select();
+  document.execCommand('copy');
+  $('#copyBtn').textContent = 'Copied!';
+  setTimeout(() => $('#copyBtn').textContent = 'Copy', 2000);
+};
